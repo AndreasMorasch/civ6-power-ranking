@@ -5,8 +5,10 @@ declare global {
     interface Player {
         id: number | null;
         name: string | null;
-        match_scores: MatchScore[] | null;
-        average_score: number | null;
+        match_score: MatchScore[] | null;
+
+        // calculated afterward
         average_placement: number | null;
+        average_points: number | null;
     }
 }

@@ -7,15 +7,13 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export class SupabaseService {
 
-    public async getPlayerWithScores(id: number): Promise<PlayerWithScores | null> {
+    public async getPlayersWithScores(): Promise<Player[] | null> {
         const { data, error } = await supabase
             .from('player')
-            .select('*, match_score!match_scores_player_id_fkey(*)')
-            .eq('id', id)
-            .single();
+            .select('*, match_score!match_scores_player_id_fkey(*)');
 
         if (error) {
-            console.error('Spieler mit der ID ' + id + ' konnte nicht gefunden werden.');
+            console.error('Spieler konnten nicht gefunden werden.');
             return null;
         }
 
@@ -36,7 +34,6 @@ export class SupabaseService {
             .from('player')
             .update({
                 name: player.name,
-                average_score: player.average_score,
                 average_placement: player.average_placement
             })
             .eq('id', player.id);
@@ -50,11 +47,14 @@ export class SupabaseService {
     }
 
     async saveScore(matchScore: MatchScore): Promise<boolean> {
+        console.log(matchScore);
         const { data, error } = await supabase.from('match_score').insert(matchScore);
         if (error) {
             console.error('Konnte keinen neuen Match-Score-Eintrag erstellen:', error.message);
             return false;
         }
+
+        console.log('Match score saved');
 
         return true;
     }
