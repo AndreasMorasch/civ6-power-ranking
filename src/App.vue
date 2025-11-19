@@ -34,11 +34,6 @@ async function save() {
   close();
   location.reload();
 }
-
-//active players
-const allPlayers = ref<Player[]>([])
-//filtered (active) Players
-const filteredPlayers = ref<Player[]>([])
 //currentlyShownPlayers
 const players = ref<Player[]>([])
 
@@ -53,18 +48,7 @@ onMounted(async () => {
   const sortedPlayers = sortPlayers(loadedPlayers);
 
   players.value = sortedPlayers;
-  allPlayers.value = sortedPlayers;
-  filteredPlayers.value = sortedPlayers.filter(p => !(p as any).isInactive);
-  updateRanking();
 })
-
-function updateRanking():void {
-  if (showInactivePlayers.value == true) {
-    players.value = allPlayers.value; 
-  } else {
-    players.value = filteredPlayers.value;
-  }
-}
 
 /*
 * Sortiere Spieler bei Placement und Punkten
