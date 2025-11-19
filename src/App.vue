@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { SupabaseService } from '/utils/SupabaseService';
+import { SupabaseService } from '../utils/SupabaseService';
 import { onMounted, ref } from "vue";
 
-const supabaseService = new SupabaseService();
+const supabaseService = new SupabaseService(); 
 const isOpen = ref(false);
 const playerBeingModified = ref<Player>();
 const gameNumber = ref<number | null>(null);
 const points = ref<number | null>(null);
 const character = ref('');
+const showInactivePlayers = ref(false); // default: Martin ausblenden 
+
 
 function open(player: Player) {
   isOpen.value = true;
@@ -33,35 +35,93 @@ async function save() {
   location.reload();
 }
 
+//active players
+const allPlayers = ref<Player[]>([])
+//filtered (active) Players
+const filteredPlayers = ref<Player[]>([])
+//currentlyShownPlayers
 const players = ref<Player[]>([])
 
+
 onMounted(async () => {
+  //get the players from the database. Calculate average placement and points
   const loadedPlayers = await getPlayers();
 
-  // Sortieren nach average_placement (niedrige zuerst)
-  loadedPlayers.sort((a, b) => {
-    // Falls null-Werte vorkommen, behandle sie als 0 oder setze sie nach hinten
+  const latestGameNr = getLatestGameNr(loadedPlayers);
+  markInactivePlayers(loadedPlayers, latestGameNr);
+
+  const sortedPlayers = sortPlayers(loadedPlayers);
+
+  players.value = sortedPlayers;
+  allPlayers.value = sortedPlayers;
+  filteredPlayers.value = sortedPlayers.filter(p => !(p as any).isInactive);
+  updateRanking();
+})
+
+function updateRanking():void {
+  if (showInactivePlayers.value == true) {
+    players.value = allPlayers.value; 
+  } else {
+    players.value = filteredPlayers.value;
+  }
+}
+
+/*
+* Sortiere Spieler bei Placement und Punkten
+*/
+function sortPlayers(players: Player[]): Player[] {
+  return [...players].sort((a, b) => {
+    // Falls null-Werte vorkommen, behandle sie als -Infinity (schlechter als alles andere)
     const aPlacement = a.average_placement ?? -Infinity;
     const bPlacement = b.average_placement ?? -Infinity;
 
-    //Placement ist nicht identisch
     if (aPlacement !== bPlacement) {
+      // niedrigere average_placement zuerst
       return aPlacement - bPlacement;
     }
-
-    //Falls Placement unterschiedlich ist, vergleiche die average_points (höchste zuerst)
     const aPoints = a.average_points ?? -Infinity;
     const bPoints = b.average_points ?? -Infinity;
 
+    // höhere average_points zuerst
     return bPoints - aPoints;
   });
+}
 
-  players.value = loadedPlayers;
-})
+/** 
+ * Finde höchste Game-nmr
+ */
+function getLatestGameNr(players: Player[]): number {
+  const allGameNrs: number[] = [];
+
+  for (const player of players) {
+    if (!player.match_score) continue;
+    for (const score of player.match_score) {
+      allGameNrs.push(score.game_nr ?? 0);
+    }
+  }
+
+  return Math.max(...allGameNrs);
+}
+
+/**
+ * Markiere Spieler als inaktiv/aktiv basierend auf letzte game-nmr
+ * Ein Spieler ist inaktiv, wenn er die letzten drei Spiele nicht gespielt hat.
+ */
+function markInactivePlayers(players: Player[], latestGameNr: number): void {
+  for (const player of players) {
+    const lastPlayed = Math.max(...(player.match_score?.map(ms => ms.game_nr ?? 0) || [0]));
+    (player as any).isInactive = latestGameNr - lastPlayed >= 2;
+  }
+}
 
 async function getPlayers(): Promise<Player[]> {
-  const players: Player[] = await supabaseService.getPlayersWithScores() ?? [];
+  let players: Player[] = await supabaseService.getPlayersWithScores() ?? [];
+  calculatePlayerStats(players);
+  return players;
+}
 
+
+function calculatePlayerStats(players: Player[]): void {
   // Gruppieren nach game_nr
   const scoresByGame: Record<number, MatchScore[]> = {};
 
@@ -78,7 +138,6 @@ async function getPlayers(): Promise<Player[]> {
       scoresByGame[score.game_nr].push(score);
     }
   }
-
   // Berechnungen
   for (const player of players) {
     const scores = player.match_score?.filter(s => s.points !== null) ?? [];
@@ -89,7 +148,7 @@ async function getPlayers(): Promise<Player[]> {
     const placements: number[] = [];
 
     for (const score of scores) {
-      const gameNr = score.game_nr!;
+      const gameNr = score.game_nr;
       const playerId = score.player_id;
 
       const allScoresThisGame = scoresByGame[gameNr];
@@ -106,8 +165,6 @@ async function getPlayers(): Promise<Player[]> {
     const totalPlacement = placements.reduce((sum, r) => sum + r, 0);
     player.average_placement = placements.length > 0 ? totalPlacement / placements.length : null;
   }
-
-  return players;
 }
 
 function getBgColor(index: number): string {
@@ -157,6 +214,15 @@ function getBgColor(index: number): string {
           <!-- Bild blockt nur so viel Platz wie nötig -->
           <img src="@/assets/player-ranking.png" alt="Spieler Ranking" class="w-full h-auto" />
 
+          <!-- Checkbox inaktive Spieler -->
+          <div class="flex justify-center items-center mb-2 mt-1 text-white">
+            <input type="checkbox" id="showInactivePlayers" v-model="showInactivePlayers" @change="updateRanking"
+              class="mr-2 accent-amber-600" />
+            <label for="showInactivePlayers" class="cursor-pointer select-none">
+              Verlorene Brüder anzeigen
+            </label>
+          </div>
+
           <div class="flex mx-4 text-sm text-white">
             <div class="flex-1 flex basis-[15%] justify-center items-center">Platz</div>
             <div class="flex-1 flex basis-[17%] justify-center items-center">Name</div>
@@ -165,10 +231,10 @@ function getBgColor(index: number): string {
             <div class="flex-1 flex basis-[30%] justify-center items-center">⌀ Platz</div>
           </div>
 
-          <div v-for="(player, index) in players" :key="player.id"
-            class="flex-1 flex flex-col space-y-1 overflow-hidden py-1">
+          <div v-for="(player, index) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
+            :key="player.id" class="flex-1 flex flex-col space-y-1 overflow-hidden py-1">
             <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white" @click="open(player)"
-              :class="getBgColor(index)">
+              :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
               <div class="flex-1 flex basis-[15%] text-2xl justify-center items-center">#{{ index + 1 }}</div>
               <div class="flex-1 flex basis-[17%] justify-center items-center">{{ player.name }}</div>
               <div class="flex-1 flex basis-[8%] justify-center items-center">{{ player.match_score.length }}</div>
@@ -182,7 +248,6 @@ function getBgColor(index: number): string {
               </div>
             </div>
           </div>
-
         </div>
 
         <div class="flex-1 h-3/4 rounded-lg shadow-md border-2 border-white bg-[rgba(133,63,63,0.5)]">
