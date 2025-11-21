@@ -152,22 +152,26 @@ function calculatePlayerStats(players: Player[]): void {
 }
 
 function getBgColor(index: number): string {
-  switch (index) {
-    case 0:
-      return 'bg-green-400'; // Platz 1
-    case 1:
-      return 'bg-green-300'; // Platz 2
-    case 2:
-    case 3:
-    case 4:
-      return 'bg-yellow-300'; // Platz 3-5
-    case 5:
-      return 'bg-red-300'; // Platz 6
-    case 6:
-      return 'bg-red-400'; // Platz 7
-    default:
-      return 'bg-gray-200'; // Fallback
+  let activePlayers = getActivePlayerCount();
+
+  if(showInactivePlayers.value) {
+    activePlayers = players.value.length;
   }
+
+  // color for the first two places
+  if (index === 0) return 'bg-green-400';
+  if (index === 1) return 'bg-green-300';
+
+  // colors for the last two players
+  if (index === activePlayers - 2) return 'bg-red-300';
+  if (index === activePlayers - 1) return 'bg-red-400';
+
+  // color for the middle players (default)
+  return 'bg-yellow-300';
+}
+
+function getActivePlayerCount(): number {
+  return players.value.filter(p => !(p as any).isInactive).length;
 }
 
 </script>
@@ -200,7 +204,7 @@ function getBgColor(index: number): string {
 
           <!-- Checkbox inaktive Spieler -->
           <div class="flex justify-center items-center mb-2 mt-1 text-white">
-            <input type="checkbox" id="showInactivePlayers" v-model="showInactivePlayers" @change="updateRanking"
+            <input type="checkbox" id="showInactivePlayers" v-model="showInactivePlayers"
               class="mr-2 accent-amber-600" />
             <label for="showInactivePlayers" class="cursor-pointer select-none">
               Verlorene Brüder anzeigen
@@ -217,7 +221,7 @@ function getBgColor(index: number): string {
 
           <div v-for="(player, index) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
             :key="player.id" class="flex-1 flex flex-col space-y-1 overflow-hidden py-1">
-            <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white" @click="open(player)"
+            <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white" @click="!(player as any).isInactive && open(player)"
               :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
               <div class="flex-1 flex basis-[15%] text-2xl justify-center items-center">#{{ index + 1 }}</div>
               <div class="flex-1 flex basis-[17%] justify-center items-center">{{ player.name }}</div>
