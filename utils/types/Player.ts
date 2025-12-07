@@ -10,5 +10,6 @@ declare global {
         // calculated afterward
         average_placement: number | null;
         average_points: number | null;
+        total_wins: number | 0;
     }
 }

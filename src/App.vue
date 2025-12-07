@@ -2,7 +2,7 @@
 import { SupabaseService } from '../utils/SupabaseService';
 import { onMounted, ref } from "vue";
 
-const supabaseService = new SupabaseService(); 
+const supabaseService = new SupabaseService();
 const isOpen = ref(false);
 const playerBeingModified = ref<Player>();
 const gameNumber = ref<number | null>(null);
@@ -110,6 +110,8 @@ function calculatePlayerStats(players: Player[]): void {
   const scoresByGame: Record<number, MatchScore[]> = {};
 
   for (const player of players) {
+    player.total_wins = 0;
+
     if (!player.match_score) continue;
 
     for (const score of player.match_score) {
@@ -144,6 +146,7 @@ function calculatePlayerStats(players: Player[]): void {
 
       const rank = sorted.findIndex(s => s.player_id === playerId) + 1;
       if (rank > 0) placements.push(rank);
+      if (rank == 1) player.total_wins = player.total_wins + 1;
     }
 
     const totalPlacement = placements.reduce((sum, r) => sum + r, 0);
@@ -154,7 +157,7 @@ function calculatePlayerStats(players: Player[]): void {
 function getBgColor(index: number): string {
   let activePlayers = getActivePlayerCount();
 
-  if(showInactivePlayers.value) {
+  if (showInactivePlayers.value) {
     activePlayers = players.value.length;
   }
 
@@ -172,6 +175,12 @@ function getBgColor(index: number): string {
 
 function getActivePlayerCount(): number {
   return players.value.filter(p => !(p as any).isInactive).length;
+}
+
+//Returns the crown as a string based on total wins. Adjust this function to change the crown image
+function getCrowns(totalWins: number | null): string {
+  if (totalWins == null) return;
+  return '👑'.repeat(totalWins);
 }
 
 </script>
@@ -221,10 +230,16 @@ function getActivePlayerCount(): number {
 
           <div v-for="(player, index) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
             :key="player.id" class="flex-1 flex flex-col space-y-1 overflow-hidden py-1">
-            <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white" @click="!(player as any).isInactive && open(player)"
+            <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white"
+              @click="!(player as any).isInactive && open(player)"
               :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
               <div class="flex-1 flex basis-[15%] text-2xl justify-center items-center">#{{ index + 1 }}</div>
-              <div class="flex-1 flex basis-[17%] justify-center items-center">{{ player.name }}</div>
+              <div class="flex-1 flex basis-[17%] justify-center items-center">
+                <div class="text-center">
+                  {{ player.name }}<br>
+                  <span v-if="player.total_wins">{{ getCrowns(player.total_wins) }}</span>
+                </div>
+              </div>
               <div class="flex-1 flex basis-[8%] justify-center items-center">{{ player.match_score.length }}</div>
               <div class="flex-1 flex basis-[30%] justify-center items-center text-center">⌀
                 {{ player.average_points?.toFixed(2) ?? '-' }}
