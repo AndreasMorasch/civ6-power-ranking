@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { SupabaseService } from '../utils/SupabaseService';
-import { onMounted, ref } from "vue";
+import {SupabaseService} from '../utils/SupabaseService';
+import {onMounted, ref} from "vue";
 
 const supabaseService = new SupabaseService();
 const isOpen = ref(false);
@@ -8,8 +8,17 @@ const playerBeingModified = ref<Player>();
 const gameNumber = ref<number | null>(null);
 const points = ref<number | null>(null);
 const character = ref('');
-const showInactivePlayers = ref(false); // default: Martin ausblenden 
+const showInactivePlayers = ref(false); // default: Martin ausblenden
+const players = ref<Player[]>([]); // //currentlyShownPlayers
+const playerRecords = ref<PlayerRecord[]>([]);
+const highestScorePlayer = ref<RecordPlayerResult>();
+const lowestScorePlayer = ref<RecordPlayerResult>();
+const mostFrequentSecondPlacePlayer = ref<RecordPlayerResult>();
 
+interface RecordPlayerResult {
+  playerName: string;
+  score: number;
+}
 
 function open(player: Player) {
   isOpen.value = true;
@@ -28,31 +37,28 @@ async function save() {
     points: points.value
   }
 
-  const success = await supabaseService.saveScore(matchScore);
-  console.log(success);
-  // todo: die variablen wieder clearen
+  await supabaseService.saveScore(matchScore);
   close();
   location.reload();
 }
-//currentlyShownPlayers
-const players = ref<Player[]>([])
 
-
+// get the players from the database. calculate average placement and points
 onMounted(async () => {
-  //get the players from the database. Calculate average placement and points
   const loadedPlayers = await getPlayers();
+  playerRecords.value = await getPlayerRecords();
+
+  console.log(playerRecords.value);
 
   const latestGameNr = getLatestGameNr(loadedPlayers);
   markInactivePlayers(loadedPlayers, latestGameNr);
+  setPlayerWithHighestScore(loadedPlayers);
+  setPlayerWithLowestScore(loadedPlayers);
+  getMostFrequentSecondPlace(loadedPlayers);
 
-  const sortedPlayers = sortPlayers(loadedPlayers);
-
-  players.value = sortedPlayers;
+  players.value = sortPlayers(loadedPlayers);
 })
 
-/*
-* Sortiere Spieler bei Placement und Punkten
-*/
+// sort players by average placement and points
 function sortPlayers(players: Player[]): Player[] {
   return [...players].sort((a, b) => {
     // Falls null-Werte vorkommen, behandle sie als -Infinity (schlechter als alles andere)
@@ -71,9 +77,6 @@ function sortPlayers(players: Player[]): Player[] {
   });
 }
 
-/** 
- * Finde höchste Game-nmr
- */
 function getLatestGameNr(players: Player[]): number {
   const allGameNrs: number[] = [];
 
@@ -100,10 +103,94 @@ function markInactivePlayers(players: Player[], latestGameNr: number): void {
 
 async function getPlayers(): Promise<Player[]> {
   let players: Player[] = await supabaseService.getPlayersWithScores() ?? [];
+
   calculatePlayerStats(players);
+
   return players;
 }
 
+async function getPlayerRecords(): Promise<PlayerRecord[]> {
+  return await supabaseService.getPlayerRecords() ?? [];
+}
+
+function setPlayerWithHighestScore(players: Player[]): void {
+  let currentBest: RecordPlayerResult | null = null;
+
+  for (const player of players) {
+    for (const match of player.match_score) {
+
+      if (currentBest === null || match.points > currentBest.score) {
+        currentBest = {
+          playerName: player.name,
+          score: match.points
+        };
+      }
+    }
+  }
+
+  highestScorePlayer.value = currentBest;
+}
+
+function setPlayerWithLowestScore(players: Player[]): void {
+  let currentLowest: RecordPlayerResult | null = null;
+
+  for (const player of players) {
+    for (const match of player.match_score) {
+
+      if (currentLowest === null || match.points < currentLowest.score) {
+        currentLowest = {
+          playerName: player.name,
+          score: match.points
+        };
+      }
+    }
+  }
+
+  lowestScorePlayer.value = currentLowest;
+}
+
+function getMostFrequentSecondPlace(players: Player[]): void {
+  const gamesMap = new Map<number, { name: string; points: number }[]>();
+
+  for (const player of players) {
+    for (const match of player.match_score) {
+      if (!gamesMap.has(match.game_nr)) {
+        gamesMap.set(match.game_nr, []);
+      }
+
+      gamesMap.get(match.game_nr)?.push({
+        name: player.name,
+        points: match.points
+      });
+    }
+  }
+
+  const secondPlaceCounts = new Map<string, number>();
+
+  gamesMap.forEach((participants, gameNr) => {
+    participants.sort((a, b) => b.points - a.points);
+
+    if (participants.length >= 2) {
+      const secondPlacePlayer = participants[1];
+
+      const currentCount = secondPlaceCounts.get(secondPlacePlayer.name) || 0;
+      secondPlaceCounts.set(secondPlacePlayer.name, currentCount + 1);
+    }
+  });
+
+  let result: RecordPlayerResult | null = null;
+
+  secondPlaceCounts.forEach((count, name) => {
+    if (result === null || count > result.score) {
+      result = {
+        playerName: name,
+        score: count
+      };
+    }
+  });
+
+  mostFrequentSecondPlacePlayer.value = result;
+}
 
 function calculatePlayerStats(players: Player[]): void {
   // Gruppieren nach game_nr
@@ -141,8 +228,8 @@ function calculatePlayerStats(players: Player[]): void {
       if (!allScoresThisGame) continue;
 
       const sorted = [...allScoresThisGame]
-        .filter(s => s.points !== null)
-        .sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+          .filter(s => s.points !== null)
+          .sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
 
       const rank = sorted.findIndex(s => s.player_id === playerId) + 1;
       if (rank > 0) placements.push(rank);
@@ -187,15 +274,15 @@ function getCrowns(totalWins: number | null): string {
 
 <template>
   <div class="relative w-full h-screen overflow-hidden">
-    <img src="@/assets/wallpaper.jpg" alt="Background" class="absolute top-0 left-0 w-full h-full object-cover z-0" />
+    <img src="@/assets/wallpaper.jpg" alt="Background" class="absolute top-0 left-0 w-full h-full object-cover z-0"/>
 
     <video autoplay muted loop playsinline class="absolute top-0 left-0 w-full h-full object-cover opacity-30 z-10">
-      <source src="@/assets/smoke.mp4" type="video/mp4" />
+      <source src="@/assets/smoke.mp4" type="video/mp4"/>
       Dein Browser unterstützt das Video nicht.
     </video>
 
     <video autoplay muted loop playsinline class="absolute top-0 left-0 w-full h-full object-cover opacity-30 z-10">
-      <source src="@/assets/sparkles.mp4" type="video/mp4" />
+      <source src="@/assets/sparkles.mp4" type="video/mp4"/>
       Dein Browser unterstützt das Video nicht.
     </video>
 
@@ -207,14 +294,14 @@ function getCrowns(totalWins: number | null): string {
 
       <div class="flex flex-col flex-wrap sm:flex-row justify-center gap-8 px-8 h-full z-30">
         <div
-          class="flex-1 h-3/4 rounded-lg shadow-md border-2 border-white bg-[rgba(133,63,63,0.5)] flex flex-col pb-2">
+            class="flex-1 h-3/4 rounded-lg shadow-md border-2 border-white bg-[rgba(133,63,63,0.5)] flex flex-col pb-2">
           <!-- Bild blockt nur so viel Platz wie nötig -->
-          <img src="@/assets/player-ranking.png" alt="Spieler Ranking" class="w-full h-auto" />
+          <img src="@/assets/player-ranking.png" alt="Spieler Ranking" class="w-full h-auto"/>
 
           <!-- Checkbox inaktive Spieler -->
           <div class="flex justify-center items-center mb-2 mt-1 text-white">
             <input type="checkbox" id="showInactivePlayers" v-model="showInactivePlayers"
-              class="mr-2 accent-amber-600" />
+                   class="mr-2 accent-amber-600"/>
             <label for="showInactivePlayers" class="cursor-pointer select-none">
               Verlorene Brüder anzeigen
             </label>
@@ -229,10 +316,10 @@ function getCrowns(totalWins: number | null): string {
           </div>
 
           <div v-for="(player, index) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
-            :key="player.id" class="flex-1 flex flex-col space-y-1 overflow-hidden py-1">
+               :key="player.id" class="flex-1 flex flex-col space-y-1 cursor-pointer overflow-hidden py-1">
             <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white"
-              @click="!(player as any).isInactive && open(player)"
-              :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
+                 @click="!(player as any).isInactive && open(player)"
+                 :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
               <div class="flex-1 flex basis-[15%] text-2xl justify-center items-center">#{{ index + 1 }}</div>
               <div class="flex-1 flex basis-[17%] justify-center items-center">
                 <div class="text-center">
@@ -246,15 +333,90 @@ function getCrowns(totalWins: number | null): string {
               </div>
               <div class="flex-1 flex basis-[30%] justify-center items-center">
                 ⌀
-                <img src="@/assets/podium.svg" alt="Podium" class="h-4 w-4 mx-2" />
+                <img src="@/assets/podium.svg" alt="Podium" class="h-4 w-4 mx-2"/>
                 {{ player.average_placement?.toFixed(2) ?? '-' }}
               </div>
             </div>
           </div>
         </div>
 
-        <div class="flex-1 h-3/4 rounded-lg shadow-md border-2 border-white bg-[rgba(133,63,63,0.5)]">
-          <img src="@/assets/all-time-records.png" alt="All-Time Rekorde" />
+        <div
+            class="flex-1 h-3/4 rounded-lg shadow-md border-2 border-white bg-[rgba(133,63,63,0.5)] gap-2 flex flex-col pb-2">
+          <img src="@/assets/all-time-records.png" alt="All-Time Rekorde"/>
+
+          <div v-if="highestScorePlayer"
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(199,194,43)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/medal.svg" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">Punktesammler:</div>
+                <div class="text-lg italic">&nbsp;(Meiste Punkte in einem Spiel)</div>
+              </div>
+              <div class="text-color">{{ highestScorePlayer.playerName }}: {{ highestScorePlayer.score }} Punkte</div>
+            </div>
+
+          </div>
+
+          <div
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(21,166,218)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/science-symbol.webp" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">Newton:</div>
+                <div class="text-lg italic">&nbsp;(Meiste Wissenschaft in einem Spiel)</div>
+              </div>
+              <div class="text-color">Andi: 923 Wissenschaft</div>
+            </div>
+          </div>
+
+          <div
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(196,26,209)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/culture-symbol.webp" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">Beethoven:</div>
+                <div class="text-lg italic">&nbsp;(Meiste Kultur in einem Spiel)</div>
+              </div>
+              <div class="text-color">Power: 793 Kultur</div>
+            </div>
+          </div>
+
+          <div
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(52,207,73)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/clock.svg" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">Usain Bolt:</div>
+                <div class="text-lg italic">&nbsp;(Schnellster Sieg nach Runden)</div>
+              </div>
+              <div class="text-color">Martin: 137 Runden</div>
+            </div>
+          </div>
+
+          <div v-if="mostFrequentSecondPlacePlayer"
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(129,129,129)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/middlefinger.svg" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">Vizekusen:</div>
+                <div class="text-lg italic">&nbsp;(Am häufigsten zweiter)</div>
+              </div>
+              <div class="text-color">{{ mostFrequentSecondPlacePlayer.playerName }}: {{ mostFrequentSecondPlacePlayer.score }}x</div>
+            </div>
+          </div>
+
+          <div
+              v-if="lowestScorePlayer" class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(175,71,35)] rounded-2xl hover:outline-2 hover:outline-white">
+            <img src="@/assets/thumb-down.svg" alt="medal" class="h-8 w-8"/>
+            <div class="flex flex-col items-center text-center">
+              <div class="flex flex-row justify-center">
+                <div class="text-lg font-semibold">GG go next:</div>
+                <div class="text-lg italic">&nbsp;(Am wenigsten Punkte in einem Spiel)</div>
+              </div>
+              <div class="text-color">{{ lowestScorePlayer.playerName }}: {{ lowestScorePlayer.score }} Punkte</div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -275,11 +437,11 @@ function getCrowns(totalWins: number | null): string {
       <div class="space-y-4">
         <label>Spiel Nummer / Id</label>
         <input type="number" v-model.number="gameNumber" placeholder="Spiel Nummer / Id"
-          class="w-full border rounded p-2" />
+               class="w-full border rounded p-2"/>
         <label>Charakter</label>
-        <input type="text" v-model="character" placeholder="Charakter" class="w-full border rounded p-2" />
+        <input type="text" v-model="character" placeholder="Charakter" class="w-full border rounded p-2"/>
         <label>Gesamtpunkte</label>
-        <input type="number" v-model.number="points" placeholder="Gesamtpunkte" class="w-full border rounded p-2" />
+        <input type="number" v-model.number="points" placeholder="Gesamtpunkte" class="w-full border rounded p-2"/>
       </div>
 
       <!-- Button -->

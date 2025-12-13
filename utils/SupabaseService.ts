@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import {PlayerRecord} from "./types/Record";
 
 const supabaseUrl = 'https://cjnswuamnsmyoiwilbuf.supabase.co';
 const supabaseKey = import.meta.env.VITE_SUPABASE_KEY;
@@ -19,6 +20,20 @@ export class SupabaseService {
 
         return data;
     }
+
+    public async getPlayerRecords(): Promise<PlayerRecord[] | null> {
+        const { data, error } = await supabase
+            .from('record')
+            .select('*');
+
+        if (error) {
+            console.error('Rekorde konnten nicht gefunden werden.');
+            return null;
+        }
+
+        return data;
+    }
+
     async savePlayer(player: Player): Promise<boolean> {
         const { data, error } = await supabase.from('player').insert(player);
         if (error) {
