@@ -3,7 +3,11 @@ import {SupabaseService} from '../utils/SupabaseService';
 import {onMounted, ref} from "vue";
 
 const supabaseService = new SupabaseService();
-const isOpen = ref(false);
+const matchScoreModalIsOpen = ref(false);
+const recordScoreModalIsOpen = ref(false);
+const openedRecordTypeModal = ref('');
+const selectedRecordPlayerId = ref(0);
+const recordValue = ref(0);
 const playerBeingModified = ref<Player>();
 const gameNumber = ref<number | null>(null);
 const points = ref<number | null>(null);
@@ -14,22 +18,25 @@ const playerRecords = ref<PlayerRecord[]>([]);
 const highestScorePlayer = ref<RecordPlayerResult>();
 const lowestScorePlayer = ref<RecordPlayerResult>();
 const mostFrequentSecondPlacePlayer = ref<RecordPlayerResult>();
+const highestSciencePlayer = ref<RecordPlayerResult>();
+const highestCulturePlayer = ref<RecordPlayerResult>();
+const leastRoundsPlayer = ref<RecordPlayerResult>();
 
 interface RecordPlayerResult {
   playerName: string;
   score: number;
 }
 
-function open(player: Player) {
-  isOpen.value = true;
+function openMatchScoreModal(player: Player) {
+  matchScoreModalIsOpen.value = true;
   playerBeingModified.value = player;
 }
 
-function close() {
-  isOpen.value = false;
+function closeMatchScoreModal() {
+  matchScoreModalIsOpen.value = false;
 }
 
-async function save() {
+async function saveMatchScore() {
   const matchScore: MatchScore = {
     player_id: playerBeingModified.value.id,
     game_nr: gameNumber.value,
@@ -38,7 +45,29 @@ async function save() {
   }
 
   await supabaseService.saveScore(matchScore);
-  close();
+  closeMatchScoreModal();
+  location.reload();
+}
+
+function openRecordModal(recordType: string) {
+  recordScoreModalIsOpen.value = true;
+  openedRecordTypeModal.value = recordType;
+}
+
+function closeRecordModal() {
+  recordScoreModalIsOpen.value = false;
+}
+
+async function saveRecord() {
+  const playerRecord: PlayerRecord = {
+    id: selectedRecordPlayerId.value,
+    science: openedRecordTypeModal.value == "science" ? recordValue.value : null,
+    culture: openedRecordTypeModal.value == "culture" ? recordValue.value : null,
+    least_rounds: openedRecordTypeModal.value == "least_rounds" ? recordValue.value : null,
+  }
+
+  await supabaseService.saveRecord(playerRecord);
+  closeMatchScoreModal();
   location.reload();
 }
 
@@ -47,13 +76,16 @@ onMounted(async () => {
   const loadedPlayers = await getPlayers();
   playerRecords.value = await getPlayerRecords();
 
-  console.log(playerRecords.value);
-
   const latestGameNr = getLatestGameNr(loadedPlayers);
   markInactivePlayers(loadedPlayers, latestGameNr);
   setPlayerWithHighestScore(loadedPlayers);
   setPlayerWithLowestScore(loadedPlayers);
-  getMostFrequentSecondPlace(loadedPlayers);
+  setMostFrequentSecondPlace(loadedPlayers);
+  if(loadedPlayers) {
+    setHighestSciencePlayer();
+    setHighestCulturePlayer();
+    setLeastRoundsPlayer();
+  }
 
   players.value = sortPlayers(loadedPlayers);
 })
@@ -149,7 +181,7 @@ function setPlayerWithLowestScore(players: Player[]): void {
   lowestScorePlayer.value = currentLowest;
 }
 
-function getMostFrequentSecondPlace(players: Player[]): void {
+function setMostFrequentSecondPlace(players: Player[]): void {
   const gamesMap = new Map<number, { name: string; points: number }[]>();
 
   for (const player of players) {
@@ -190,6 +222,51 @@ function getMostFrequentSecondPlace(players: Player[]): void {
   });
 
   mostFrequentSecondPlacePlayer.value = result;
+}
+
+function setHighestSciencePlayer(): void {
+  if (!playerRecords.value || playerRecords.value.length === 0) {
+    return;
+  }
+
+  const bestRecord = playerRecords.value.reduce((prev, current) => {
+    return (prev.science > current.science) ? prev : current;
+  });
+
+  highestSciencePlayer.value = {
+    playerName: bestRecord.player?.name ?? 'Unbekannt',
+    score: bestRecord.science
+  };
+}
+
+function setHighestCulturePlayer(): void {
+  if (!playerRecords.value || playerRecords.value.length === 0) {
+    return;
+  }
+
+  const bestRecord = playerRecords.value.reduce((prev, current) => {
+    return (prev.culture > current.culture) ? prev : current;
+  });
+
+  highestCulturePlayer.value = {
+    playerName: bestRecord.player?.name ?? 'Unbekannt',
+    score: bestRecord.culture
+  };
+}
+
+function setLeastRoundsPlayer(): void {
+  if (!playerRecords.value || playerRecords.value.length === 0) {
+    return;
+  }
+
+  const bestRecord = playerRecords.value.reduce((prev, current) => {
+    return (prev.least_rounds < current.least_rounds) ? prev : current;
+  });
+
+  leastRoundsPlayer.value = {
+    playerName: bestRecord.player?.name ?? 'Unbekannt',
+    score: bestRecord.least_rounds
+  };
 }
 
 function calculatePlayerStats(players: Player[]): void {
@@ -318,7 +395,7 @@ function getCrowns(totalWins: number | null): string {
           <div v-for="(player, index) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
                :key="player.id" class="flex-1 flex flex-col space-y-1 cursor-pointer overflow-hidden py-1">
             <div class="flex-1 mx-2 rounded-2xl flex hover:outline-2 hover:outline-white"
-                 @click="!(player as any).isInactive && open(player)"
+                 @click="!(player as any).isInactive && openMatchScoreModal(player)"
                  :class="[getBgColor(index), (player as any).isInactive ? 'opacity-40 grayscale' : '']">
               <div class="flex-1 flex basis-[15%] text-2xl justify-center items-center">#{{ index + 1 }}</div>
               <div class="flex-1 flex basis-[17%] justify-center items-center">
@@ -358,38 +435,44 @@ function getCrowns(totalWins: number | null): string {
           </div>
 
           <div
-              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(21,166,218)] rounded-2xl hover:outline-2 hover:outline-white">
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden
+              bg-[rgba(21,166,218)] rounded-2xl hover:outline-2 hover:outline-white"
+              @click="openRecordModal('science')">
             <img src="@/assets/science-symbol.webp" alt="medal" class="h-8 w-8"/>
             <div class="flex flex-col items-center text-center">
               <div class="flex flex-row justify-center">
                 <div class="text-lg font-semibold">Newton:</div>
                 <div class="text-lg italic">&nbsp;(Meiste Wissenschaft in einem Spiel)</div>
               </div>
-              <div class="text-color">Andi: 923 Wissenschaft</div>
+              <div v-if="highestSciencePlayer" class="text-color">{{ highestSciencePlayer.playerName }}: {{ highestSciencePlayer.score }} Wissenschaft</div>
             </div>
           </div>
 
           <div
-              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(196,26,209)] rounded-2xl hover:outline-2 hover:outline-white">
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden
+              bg-[rgba(196,26,209)] rounded-2xl hover:outline-2 hover:outline-white"
+              @click="openRecordModal('culture')">
             <img src="@/assets/culture-symbol.webp" alt="medal" class="h-8 w-8"/>
             <div class="flex flex-col items-center text-center">
               <div class="flex flex-row justify-center">
                 <div class="text-lg font-semibold">Beethoven:</div>
                 <div class="text-lg italic">&nbsp;(Meiste Kultur in einem Spiel)</div>
               </div>
-              <div class="text-color">Power: 793 Kultur</div>
+              <div v-if="highestCulturePlayer" class="text-color">{{ highestCulturePlayer.playerName }}: {{ highestCulturePlayer.score }} Kultur</div>
             </div>
           </div>
 
           <div
-              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden bg-[rgba(52,207,73)] rounded-2xl hover:outline-2 hover:outline-white">
+              class="flex justify-center items-center gap-4 py-1 mx-2 overflow-hidden
+              bg-[rgba(52,207,73)] rounded-2xl hover:outline-2 hover:outline-white"
+              @click="openRecordModal('least_rounds')">
             <img src="@/assets/clock.svg" alt="medal" class="h-8 w-8"/>
             <div class="flex flex-col items-center text-center">
               <div class="flex flex-row justify-center">
                 <div class="text-lg font-semibold">Usain Bolt:</div>
                 <div class="text-lg italic">&nbsp;(Schnellster Sieg nach Runden)</div>
               </div>
-              <div class="text-color">Martin: 137 Runden</div>
+              <div v-if="leastRoundsPlayer" class="text-color">{{ leastRoundsPlayer.playerName }}: {{ leastRoundsPlayer.score }} Runden</div>
             </div>
           </div>
 
@@ -422,14 +505,14 @@ function getCrowns(totalWins: number | null): string {
     </div>
   </div>
 
-  <div v-if="isOpen" class="fixed inset-0 flex justify-center items-center z-70">
+  <div v-if="matchScoreModalIsOpen" class="fixed inset-0 flex justify-center items-center z-70">
     <div class="bg-white rounded-xl p-6 w-1/2 relative shadow-xl">
       <!-- Schließen Button -->
-      <button @click="close" class="absolute top-2 right-2 text-gray-500 hover:text-black">
+      <button @click="closeMatchScoreModal" class="absolute top-2 right-2 text-gray-500 hover:text-black">
         ✖
       </button>
 
-      <!-- Modal Inhalt -->
+      <!-- Modal für Spielergebniseintrag -->
       <div class="flex justify-center items-center">
         <h2 class="text-xl font-bold mb-4">Neuen Eintrag für {{ playerBeingModified.name }} hinzufügen</h2>
       </div>
@@ -446,7 +529,42 @@ function getCrowns(totalWins: number | null): string {
 
       <!-- Button -->
       <div class="mt-6 flex justify-end">
-        <button @click="save" class="bg-[rgba(133,63,63)] text-white px-4 py-2 rounded hover:bg-amber-600">
+        <button @click="saveMatchScore" class="bg-[rgba(133,63,63)] text-white px-4 py-2 rounded hover:bg-amber-600">
+          Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal für Rekordeintrag -->
+  <div v-if="recordScoreModalIsOpen" class="fixed inset-0 flex justify-center items-center z-70" style="background-color: rgba(0,0,0,0.5);">
+    <div class="bg-white rounded-xl p-6 w-1/2 relative shadow-xl">
+      <button @click="closeRecordModal" class="absolute top-2 right-2 text-gray-500 hover:text-black">
+        ✖
+      </button>
+
+      <div class="flex justify-center items-center">
+        <h2 class="text-xl font-bold mb-4">Neuen Rekord hinzufügen</h2>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block mb-1">Spieler wählen</label>
+          <select v-model="selectedRecordPlayerId" class="w-full border rounded p-2 bg-white">
+            <option value="" disabled selected>Spieler wählen</option>
+            <option v-for="(player) in players.filter(p => showInactivePlayers || !(p as any).isInactive)"
+                    :key="player.id" :value="player.id">{{ player.name }}</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block mb-1">Rekordwert</label>
+          <input type="number" v-model.number="recordValue" placeholder="Gesamtpunkte" class="w-full border rounded p-2"/>
+        </div>
+      </div>
+
+      <div class="mt-6 flex justify-end">
+        <button @click="saveRecord()" class="bg-[rgba(133,63,63)] text-white px-4 py-2 rounded hover:bg-amber-600">
           Speichern
         </button>
       </div>
